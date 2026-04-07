@@ -1,8 +1,8 @@
-# TinyWebServer
+# High performance Webserver
 
-Linux 下的 C++ 轻量级 Web 服务器，使用 `主从 Reactor + epoll + timerfd + 线程池 + MySQL 连接池` 实现高并发 HTTP 服务。
+Linux 下的 C++ 高性能 Web 服务器，使用 `主从 Reactor + epoll + timerfd + 线程池 + MySQL 连接池` 实现高并发 HTTP 服务。
 
-## 重构后的目录
+## 目录
 
 ```text
 .

@@ -1,0 +1,26 @@
+# Build outputs
+*.o
+*.out
+*.a
+*.so
+server
+
+# Logs
+ServerLog*
+*.log
+
+# macOS
+.DS_Store
+
+# Editors / IDEs
+.idea/
+.vscode/
+
+# Swap / temp files
+*.swp
+*.swo
+*~
+
+# Benchmark/runtime leftovers
+core
+core.*
