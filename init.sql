@@ -1,0 +1,6 @@
+USE qgydb;
+
+CREATE TABLE IF NOT EXISTS user (
+    username CHAR(50) NOT NULL,
+    passwd CHAR(50) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -11,6 +11,9 @@ public:
     Config();
     ~Config(){};
 
+    bool load_from_file(const char *file_path);
+    bool validate(string &error) const;
+    void show_usage(const char *prog_name);
     void parse_arg(int argc, char*argv[]);
 
     //端口号
@@ -37,11 +40,21 @@ public:
     //线程池内的线程数量
     int thread_num;
 
+    //sub-reactor 数量
+    int reactor_num;
+
     //是否关闭日志
     int close_log;
 
-    //并发模型选择
-    int actor_model;
+    //配置文件路径
+    string config_file;
+
+    //数据库配置
+    string db_host;
+    int db_port;
+    string db_user;
+    string db_password;
+    string db_name;
 };
 
 #endif

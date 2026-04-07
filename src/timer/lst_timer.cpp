@@ -1,147 +1,175 @@
 #include "timer/lst_timer.h"
+#include <cassert>
+#include <string.h>
+
 #include "http/http_conn.h"
 
-sort_timer_lst::sort_timer_lst()
+namespace
 {
-    head = NULL;
-    tail = NULL;
+const int64_t kMillisecondsPerSecond = 1000;
+
+int64_t current_time_ms()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<int64_t>(ts.tv_sec) * kMillisecondsPerSecond + ts.tv_nsec / 1000000;
 }
-sort_timer_lst::~sort_timer_lst()
+}
+
+timer_heap::timer_heap()
 {
-    util_timer *tmp = head;
-    while (tmp)
+}
+
+timer_heap::~timer_heap()
+{
+    for (size_t i = 0; i < heap_.size(); ++i)
     {
-        head = tmp->next;
-        delete tmp;
-        tmp = head;
+        delete heap_[i];
     }
 }
 
-void sort_timer_lst::add_timer(util_timer *timer)
+void timer_heap::add_timer(util_timer *timer)
 {
     if (!timer)
     {
         return;
     }
-    if (!head)
-    {
-        head = tail = timer;
-        return;
-    }
-    if (timer->expire < head->expire)
-    {
-        timer->next = head;
-        head->prev = timer;
-        head = timer;
-        return;
-    }
-    add_timer(timer, head);
+    timer->heap_idx = static_cast<int>(heap_.size());
+    heap_.push_back(timer);
+    sift_up(timer->heap_idx);
 }
-void sort_timer_lst::adjust_timer(util_timer *timer)
+
+void timer_heap::adjust_timer(util_timer *timer)
 {
-    if (!timer)
+    if (!timer || timer->heap_idx < 0 || timer->heap_idx >= static_cast<int>(heap_.size()))
     {
         return;
     }
-    util_timer *tmp = timer->next;
-    if (!tmp || (timer->expire < tmp->expire))
-    {
-        return;
-    }
-    if (timer == head)
-    {
-        head = head->next;
-        head->prev = NULL;
-        timer->next = NULL;
-        add_timer(timer, head);
-    }
-    else
-    {
-        timer->prev->next = timer->next;
-        timer->next->prev = timer->prev;
-        add_timer(timer, timer->next);
-    }
+    sift_down(timer->heap_idx);
+    sift_up(timer->heap_idx);
 }
-void sort_timer_lst::del_timer(util_timer *timer)
+
+void timer_heap::del_timer(util_timer *timer)
 {
-    if (!timer)
+    if (!timer || timer->heap_idx < 0 || timer->heap_idx >= static_cast<int>(heap_.size()))
     {
         return;
     }
-    if ((timer == head) && (timer == tail))
-    {
-        delete timer;
-        head = NULL;
-        tail = NULL;
-        return;
-    }
-    if (timer == head)
-    {
-        head = head->next;
-        head->prev = NULL;
-        delete timer;
-        return;
-    }
-    if (timer == tail)
-    {
-        tail = tail->prev;
-        tail->next = NULL;
-        delete timer;
-        return;
-    }
-    timer->prev->next = timer->next;
-    timer->next->prev = timer->prev;
+    remove_at(timer->heap_idx);
     delete timer;
 }
-void sort_timer_lst::tick()
+
+void timer_heap::tick()
 {
-    if (!head)
+    const int64_t now = current_time_ms();
+    while (!heap_.empty())
     {
-        return;
-    }
-    
-    time_t cur = time(NULL);
-    util_timer *tmp = head;
-    while (tmp)
-    {
-        if (cur < tmp->expire)
+        util_timer *timer = heap_.front();
+        if (timer->expire > now)
         {
             break;
         }
-        tmp->cb_func(tmp->user_data);
-        head = tmp->next;
-        if (head)
+        remove_at(0);
+        if (timer->cb_func)
         {
-            head->prev = NULL;
+            timer->cb_func(timer->user_data);
         }
-        delete tmp;
-        tmp = head;
+        delete timer;
     }
 }
 
-void sort_timer_lst::add_timer(util_timer *timer, util_timer *lst_head)
+int64_t timer_heap::top_expire() const
 {
-    util_timer *prev = lst_head;
-    util_timer *tmp = prev->next;
-    while (tmp)
+    if (heap_.empty())
     {
-        if (timer->expire < tmp->expire)
+        return -1;
+    }
+    return heap_.front()->expire;
+}
+
+bool timer_heap::empty() const
+{
+    return heap_.empty();
+}
+
+void timer_heap::sift_up(int idx)
+{
+    while (idx > 0)
+    {
+        const int parent = (idx - 1) / 2;
+        if (heap_[parent]->expire <= heap_[idx]->expire)
         {
-            prev->next = timer;
-            timer->next = tmp;
-            tmp->prev = timer;
-            timer->prev = prev;
             break;
         }
-        prev = tmp;
-        tmp = tmp->next;
+        swap_timer(parent, idx);
+        idx = parent;
     }
-    if (!tmp)
+}
+
+void timer_heap::sift_down(int idx)
+{
+    const int size = static_cast<int>(heap_.size());
+    while (true)
     {
-        prev->next = timer;
-        timer->prev = prev;
-        timer->next = NULL;
-        tail = timer;
+        int smallest = idx;
+        const int left = idx * 2 + 1;
+        const int right = idx * 2 + 2;
+        if (left < size && heap_[left]->expire < heap_[smallest]->expire)
+        {
+            smallest = left;
+        }
+        if (right < size && heap_[right]->expire < heap_[smallest]->expire)
+        {
+            smallest = right;
+        }
+        if (smallest == idx)
+        {
+            break;
+        }
+        swap_timer(idx, smallest);
+        idx = smallest;
+    }
+}
+
+void timer_heap::swap_timer(int lhs, int rhs)
+{
+    util_timer *tmp = heap_[lhs];
+    heap_[lhs] = heap_[rhs];
+    heap_[rhs] = tmp;
+    heap_[lhs]->heap_idx = lhs;
+    heap_[rhs]->heap_idx = rhs;
+}
+
+void timer_heap::remove_at(int idx)
+{
+    const int last = static_cast<int>(heap_.size()) - 1;
+    if (idx < 0 || idx > last)
+    {
+        return;
+    }
+    if (idx != last)
+    {
+        swap_timer(idx, last);
+    }
+    util_timer *timer = heap_.back();
+    heap_.pop_back();
+    timer->heap_idx = -1;
+    if (idx < static_cast<int>(heap_.size()))
+    {
+        sift_down(idx);
+        sift_up(idx);
+    }
+}
+
+Utils::Utils() : m_TIMESLOT(0), m_timerfd(-1)
+{
+}
+
+Utils::~Utils()
+{
+    if (m_timerfd != -1)
+    {
+        close(m_timerfd);
     }
 }
 
@@ -150,7 +178,6 @@ void Utils::init(int timeslot)
     m_TIMESLOT = timeslot;
 }
 
-//对文件描述符设置非阻塞
 int Utils::setnonblocking(int fd)
 {
     int old_option = fcntl(fd, F_GETFL);
@@ -159,50 +186,102 @@ int Utils::setnonblocking(int fd)
     return old_option;
 }
 
-//将内核事件表注册读事件，ET模式，选择开启EPOLLONESHOT
 void Utils::addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
 {
     epoll_event event;
     event.data.fd = fd;
+    event.events = EPOLLIN | EPOLLRDHUP;
 
     if (1 == TRIGMode)
-        event.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
-    else
-        event.events = EPOLLIN | EPOLLRDHUP;
-
+    {
+        event.events |= EPOLLET;
+    }
     if (one_shot)
+    {
         event.events |= EPOLLONESHOT;
+    }
     epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
     setnonblocking(fd);
 }
 
-//信号处理函数
-void Utils::sig_handler(int sig)
-{
-    //为保证函数的可重入性，保留原来的errno
-    int save_errno = errno;
-    int msg = sig;
-    send(u_pipefd[1], (char *)&msg, 1, 0);
-    errno = save_errno;
-}
-
-//设置信号函数
 void Utils::addsig(int sig, void(handler)(int), bool restart)
 {
     struct sigaction sa;
     memset(&sa, '\0', sizeof(sa));
     sa.sa_handler = handler;
     if (restart)
+    {
         sa.sa_flags |= SA_RESTART;
+    }
     sigfillset(&sa.sa_mask);
     assert(sigaction(sig, &sa, NULL) != -1);
 }
 
-//定时处理任务，重新定时以不断触发SIGALRM信号
-void Utils::timer_handler()
+bool Utils::init_timerfd()
 {
-    m_timer_lst.tick();
-    alarm(m_TIMESLOT);
+    if (m_timerfd != -1)
+    {
+        return true;
+    }
+    m_timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    return m_timerfd != -1;
+}
+
+int Utils::get_timerfd() const
+{
+    return m_timerfd;
+}
+
+void Utils::update_timerfd()
+{
+    if (m_timerfd == -1)
+    {
+        return;
+    }
+
+    struct itimerspec new_value;
+    memset(&new_value, 0, sizeof(new_value));
+
+    if (!m_timer_heap.empty())
+    {
+        int64_t diff_ms = m_timer_heap.top_expire() - current_time_ms();
+        if (diff_ms < 1)
+        {
+            diff_ms = 1;
+        }
+        new_value.it_value.tv_sec = diff_ms / kMillisecondsPerSecond;
+        new_value.it_value.tv_nsec = (diff_ms % kMillisecondsPerSecond) * 1000000;
+    }
+
+    timerfd_settime(m_timerfd, 0, &new_value, NULL);
+}
+
+bool Utils::handle_timer_event()
+{
+    if (m_timerfd == -1)
+    {
+        return false;
+    }
+
+    uint64_t expirations = 0;
+    const ssize_t bytes = read(m_timerfd, &expirations, sizeof(expirations));
+    if (bytes < 0)
+    {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+            return false;
+        }
+        return false;
+    }
+
+    m_timer_heap.tick();
+    update_timerfd();
+    return true;
+}
+
+int64_t Utils::current_time_ms() const
+{
+    return ::current_time_ms();
 }
 
 void Utils::show_error(int connfd, const char *info)
@@ -211,14 +290,15 @@ void Utils::show_error(int connfd, const char *info)
     close(connfd);
 }
 
-int *Utils::u_pipefd = 0;
-int Utils::u_epollfd = 0;
-
-class Utils;
 void cb_func(client_data *user_data)
 {
-    epoll_ctl(Utils::u_epollfd, EPOLL_CTL_DEL, user_data->sockfd, 0);
     assert(user_data);
-    close(user_data->sockfd);
-    http_conn::m_user_count--;
+    if (!user_data->timer || user_data->timer->timer_version != user_data->timer_version)
+    {
+        return;
+    }
+    if (user_data->conn)
+    {
+        user_data->conn->close_conn();
+    }
 }

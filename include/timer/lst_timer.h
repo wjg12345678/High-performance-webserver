@@ -1,10 +1,13 @@
 #ifndef LST_TIMER
 #define LST_TIMER
 
-#include <unistd.h>
+#include <stdint.h>
+#include <vector>
 #include <signal.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/epoll.h>
+#include <sys/timerfd.h>
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -24,52 +27,58 @@
 #include <time.h>
 #include "log/log.h"
 
+class http_conn;
 class util_timer;
 
 struct client_data
 {
     sockaddr_in address;
     int sockfd;
+    http_conn *conn;
     util_timer *timer;
+    int timer_version;
 };
 
 class util_timer
 {
 public:
-    util_timer() : prev(NULL), next(NULL) {}
+    util_timer() : expire(0), cb_func(NULL), user_data(NULL), heap_idx(-1), timer_version(0) {}
 
 public:
-    time_t expire;
-    
+    int64_t expire;
     void (* cb_func)(client_data *);
     client_data *user_data;
-    util_timer *prev;
-    util_timer *next;
+    int heap_idx;
+    int timer_version;
 };
 
-class sort_timer_lst
+class timer_heap
 {
 public:
-    sort_timer_lst();
-    ~sort_timer_lst();
+    timer_heap();
+    ~timer_heap();
 
     void add_timer(util_timer *timer);
     void adjust_timer(util_timer *timer);
     void del_timer(util_timer *timer);
     void tick();
+    int64_t top_expire() const;
+    bool empty() const;
 
 private:
-    void add_timer(util_timer *timer, util_timer *lst_head);
+    void sift_up(int idx);
+    void sift_down(int idx);
+    void swap_timer(int lhs, int rhs);
+    void remove_at(int idx);
 
-    util_timer *head;
-    util_timer *tail;
+    std::vector<util_timer *> heap_;
 };
 
 class Utils
 {
 public:
-    Utils() {}
-    ~Utils() {}
+    Utils();
+    ~Utils();
 
     void init(int timeslot);
 
@@ -79,22 +88,19 @@ public:
     //将内核事件表注册读事件，ET模式，选择开启EPOLLONESHOT
     void addfd(int epollfd, int fd, bool one_shot, int TRIGMode);
 
-    //信号处理函数
-    static void sig_handler(int sig);
-
-    //设置信号函数
     void addsig(int sig, void(handler)(int), bool restart = true);
-
-    //定时处理任务，重新定时以不断触发SIGALRM信号
-    void timer_handler();
+    bool init_timerfd();
+    int get_timerfd() const;
+    void update_timerfd();
+    bool handle_timer_event();
+    int64_t current_time_ms() const;
 
     void show_error(int connfd, const char *info);
 
 public:
-    static int *u_pipefd;
-    sort_timer_lst m_timer_lst;
-    static int u_epollfd;
+    timer_heap m_timer_heap;
     int m_TIMESLOT;
+    int m_timerfd;
 };
 
 void cb_func(client_data *user_data);

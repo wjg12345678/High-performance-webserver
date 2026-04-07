@@ -73,7 +73,8 @@ public:
     ~http_conn() {}
 
 public:
-    void init(int sockfd, const sockaddr_in &addr, char *, int, int, string user, string passwd, string sqlname);
+    void init(int sockfd, const sockaddr_in &addr, char *, int, int, string user, string passwd, string sqlname, int epollfd);
+    void bind_client_data(client_data *client_data);
     void close_conn(bool real_close = true);
     void process();
     bool read_once();
@@ -83,8 +84,6 @@ public:
         return &m_address;
     }
     void initmysql_result(connection_pool *connPool);
-    int timer_flag;
-    int improv;
 
 
 private:
@@ -108,12 +107,11 @@ private:
     bool add_blank_line();
 
 public:
-    static int m_epollfd;
     static int m_user_count;
     MYSQL *mysql;
-    int m_state;  //读为0, 写为1
 
 private:
+    int m_epollfd;
     int m_sockfd;
     sockaddr_in m_address;
     char m_read_buf[READ_BUFFER_SIZE];
@@ -147,6 +145,7 @@ private:
     char sql_user[100];
     char sql_passwd[100];
     char sql_name[100];
+    client_data *m_client_data;
 };
 
 #endif

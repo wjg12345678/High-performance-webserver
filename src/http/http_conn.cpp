@@ -95,7 +95,11 @@ void modfd(int epollfd, int fd, int ev, int TRIGMode)
 }
 
 int http_conn::m_user_count = 0;
-int http_conn::m_epollfd = -1;
+
+void http_conn::bind_client_data(client_data *client_data)
+{
+    m_client_data = client_data;
+}
 
 //关闭连接，关闭一个连接，客户总量减一
 void http_conn::close_conn(bool real_close)
@@ -107,22 +111,32 @@ void http_conn::close_conn(bool real_close)
         m_sockfd = -1;
         m_user_count--;
     }
+
+    if (m_client_data)
+    {
+        ++m_client_data->timer_version;
+        m_client_data->conn = NULL;
+        m_client_data->timer = NULL;
+        m_client_data->sockfd = -1;
+        m_client_data = NULL;
+    }
 }
 
 //初始化连接,外部调用初始化套接字地址
 void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, int TRIGMode,
-                     int close_log, string user, string passwd, string sqlname)
+                     int close_log, string user, string passwd, string sqlname, int epollfd)
 {
     m_sockfd = sockfd;
     m_address = addr;
+    m_epollfd = epollfd;
+    m_TRIGMode = TRIGMode;
+    m_close_log = close_log;
 
     addfd(m_epollfd, sockfd, true, m_TRIGMode);
     m_user_count++;
 
     //当浏览器出现连接重置时，可能是网站根目录出错或http响应格式出错或者访问的文件中内容完全为空
     doc_root = root;
-    m_TRIGMode = TRIGMode;
-    m_close_log = close_log;
 
     strcpy(sql_user, user.c_str());
     strcpy(sql_passwd, passwd.c_str());
@@ -150,9 +164,7 @@ void http_conn::init()
     m_read_idx = 0;
     m_write_idx = 0;
     cgi = 0;
-    m_state = 0;
-    timer_flag = 0;
-    improv = 0;
+    m_client_data = NULL;
 
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
     memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
@@ -640,9 +652,9 @@ bool http_conn::process_write(HTTP_CODE ret)
     }
     case BAD_REQUEST:
     {
-        add_status_line(404, error_404_title);
-        add_headers(strlen(error_404_form));
-        if (!add_content(error_404_form))
+        add_status_line(400, error_400_title);
+        add_headers(strlen(error_400_form));
+        if (!add_content(error_400_form))
             return false;
         break;
     }
@@ -674,6 +686,7 @@ bool http_conn::process_write(HTTP_CODE ret)
             add_headers(strlen(ok_string));
             if (!add_content(ok_string))
                 return false;
+            break;
         }
     }
     default:

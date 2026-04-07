@@ -1,6 +1,7 @@
 #ifndef WEBSERVER_H
 #define WEBSERVER_H
 
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -10,8 +11,9 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <cassert>
-#include <sys/epoll.h>
+#include <vector>
 
+#include "server/sub_reactor.h"
 #include "threadpool/threadpool.h"
 #include "http/http_conn.h"
 
@@ -26,8 +28,9 @@ public:
     ~WebServer();
 
     void init(int port , string user, string passWord, string databaseName,
+              string dbHost, int dbPort,
               int log_write , int opt_linger, int trigmode, int sql_num,
-              int thread_num, int close_log, int actor_model);
+              int thread_num, int reactor_num, int close_log);
 
     void thread_pool();
     void sql_pool();
@@ -35,13 +38,7 @@ public:
     void trig_mode();
     void eventListen();
     void eventLoop();
-    void timer(int connfd, struct sockaddr_in client_address);
-    void adjust_timer(util_timer *timer);
-    void deal_timer(util_timer *timer, int sockfd);
     bool dealclientdata();
-    bool dealwithsignal(bool& timeout, bool& stop_server);
-    void dealwithread(int sockfd);
-    void dealwithwrite(int sockfd);
 
 public:
     //基础
@@ -49,9 +46,7 @@ public:
     char *m_root;
     int m_log_write;
     int m_close_log;
-    int m_actormodel;
 
-    int m_pipefd[2];
     int m_epollfd;
     http_conn *users;
 
@@ -60,11 +55,14 @@ public:
     string m_user;         //登陆数据库用户名
     string m_passWord;     //登陆数据库密码
     string m_databaseName; //使用数据库名
+    string m_dbHost;       //数据库主机
+    int m_dbPort;          //数据库端口
     int m_sql_num;
 
     //线程池相关
     threadpool<http_conn> *m_pool;
     int m_thread_num;
+    int m_reactor_num;
 
     //epoll_event相关
     epoll_event events[MAX_EVENT_NUMBER];
@@ -74,9 +72,10 @@ public:
     int m_TRIGMode;
     int m_LISTENTrigmode;
     int m_CONNTrigmode;
+    int m_next_reactor;
 
     //定时器相关
     client_data *users_timer;
-    Utils utils;
+    std::vector<SubReactor *> m_sub_reactors;
 };
 #endif
