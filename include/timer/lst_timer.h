@@ -29,6 +29,7 @@
 
 class http_conn;
 class util_timer;
+class SubReactor;
 
 struct client_data
 {
@@ -37,6 +38,7 @@ struct client_data
     http_conn *conn;
     util_timer *timer;
     int timer_version;
+    SubReactor *reactor;
 };
 
 class util_timer

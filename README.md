@@ -35,12 +35,40 @@ Linux 下的 C++ 高性能 Web 服务器，使用 `主从 Reactor + epoll + time
 
 - `app`：程序启动、参数解析、服务装配。
 - `server`：Acceptor、SubReactor、连接分发与事件循环。
-- `http`：HTTP 解析、请求处理、响应构造。
+- `http`：连接适配、HTTP 解析、路由分发、表单解码、业务服务与静态文件响应。
 - `db`：MySQL 连接池与 RAII 封装。
 - `log`：同步/异步日志与阻塞队列。
 - `timer`：基于 `timerfd + 最小堆` 的超时连接管理。
 - `common`：锁、信号量、条件变量等基础同步原语。
 - `resources`：运行时静态文件，不再与源码混放。
+
+## HTTP 层拆分
+
+当前 `http` 目录已经按职责拆成以下几个组件：
+
+- `http_conn`：连接适配器，负责 socket 读写、epoll 重置、请求交接与响应发送。
+- `http_parser`：HTTP/1.1 请求解析，输出 `HttpRequest`。
+- `http_router`：按路径和方法分发请求，协调后端服务。
+- `form_decoder`：解析 `application/x-www-form-urlencoded` 表单数据。
+- `user_service`：登录/注册业务逻辑与用户缓存协同。
+- `user_repository`：用户表读写，封装 MySQL 访问。
+- `static_file_service`：静态资源路径映射与响应元数据构造。
+- `http_request/http_response`：请求与响应数据模型。
+
+当前请求链路如下：
+
+```text
+http_conn
+  -> HttpParser
+  -> HttpRouter
+     -> FormDecoder
+     -> UserService
+        -> UserRepository
+     -> StaticFileService
+  -> http_conn::write()
+```
+
+这样 `http_conn` 不再同时承担协议解析、业务分发、数据库访问和静态文件路由，后续扩展动态路由或新增业务模块时，改动范围会更可控。
 
 ## 当前并发模型
 

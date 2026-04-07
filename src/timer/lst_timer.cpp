@@ -1,4 +1,6 @@
 #include "timer/lst_timer.h"
+#include "server/server_stats.h"
+#include "server/sub_reactor.h"
 #include <cassert>
 #include <string.h>
 
@@ -296,6 +298,11 @@ void cb_func(client_data *user_data)
     if (!user_data->timer || user_data->timer->timer_version != user_data->timer_version)
     {
         return;
+    }
+    ServerStats::get_instance().conn_timeout();
+    if (user_data->reactor)
+    {
+        user_data->reactor->dec_active_connections();
     }
     if (user_data->conn)
     {

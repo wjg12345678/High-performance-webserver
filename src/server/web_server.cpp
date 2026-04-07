@@ -1,4 +1,8 @@
 #include "server/web_server.h"
+#include "server/server_stats.h"
+
+// Global pointer for signal handler to access sub-reactors
+WebServer *g_web_server = NULL;
 
 namespace
 {
@@ -10,7 +14,12 @@ int choose_reactor_count(int reactor_num)
     }
     return reactor_num;
 }
+
+void sig_handler(int)
+{
+    ServerStats::get_instance().print_stats(g_web_server);
 }
+} // namespace
 
 WebServer::WebServer() : m_epollfd(-1), m_listenfd(-1), m_pool(NULL), m_next_reactor(0)
 {
@@ -30,6 +39,7 @@ WebServer::WebServer() : m_epollfd(-1), m_listenfd(-1), m_pool(NULL), m_next_rea
         users_timer[i].timer = NULL;
         users_timer[i].sockfd = -1;
         users_timer[i].timer_version = 0;
+        users_timer[i].reactor = NULL;
     }
 }
 
@@ -216,8 +226,30 @@ bool WebServer::dealclientdata()
     return true;
 }
 
+int WebServer::reactor_connections(int i) const
+{
+    if (i >= 0 && i < static_cast<int>(m_sub_reactors.size()))
+    {
+        return m_sub_reactors[i]->get_active_connections();
+    }
+    return 0;
+}
+
+int WebServer::threadpool_queue_size() const
+{
+    if (m_pool)
+    {
+        return m_pool->queue_size();
+    }
+    return 0;
+}
+
 void WebServer::eventLoop()
 {
+    g_web_server = this;
+    Utils utils;
+    utils.addsig(SIGUSR1, sig_handler, false);
+
     while (true)
     {
         int number = epoll_wait(m_epollfd, events, MAX_EVENT_NUMBER, -1);

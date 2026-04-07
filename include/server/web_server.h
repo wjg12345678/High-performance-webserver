@@ -40,6 +40,10 @@ public:
     void eventLoop();
     bool dealclientdata();
 
+    int reactor_count() const { return static_cast<int>(m_sub_reactors.size()); }
+    int reactor_connections(int i) const;
+    int threadpool_queue_size() const;
+
 public:
     //基础
     int m_port;

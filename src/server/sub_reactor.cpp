@@ -1,4 +1,5 @@
 #include "server/sub_reactor.h"
+#include "server/server_stats.h"
 
 #include <cassert>
 #include <errno.h>
@@ -133,7 +134,7 @@ void SubReactor::run()
             }
             else if (m_events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR))
             {
-                deal_timer(m_users_timer[sockfd].timer, sockfd);
+                deal_timer(m_users_timer[sockfd].timer, sockfd, false);
             }
             else if (m_events[i].events & EPOLLIN)
             {
@@ -168,6 +169,7 @@ void SubReactor::init_connection(int connfd, const sockaddr_in &client_address)
 {
     m_users[connfd].init(connfd, client_address, m_root, m_conn_trigmode, m_close_log,
                          m_user, m_passwd, m_database_name, m_epollfd);
+    m_active_connections.fetch_add(1, std::memory_order_relaxed);
     add_timer(connfd, client_address);
 }
 
@@ -177,6 +179,7 @@ void SubReactor::add_timer(int connfd, const sockaddr_in &client_address)
     m_users_timer[connfd].sockfd = connfd;
     m_users_timer[connfd].conn = &m_users[connfd];
     ++m_users_timer[connfd].timer_version;
+    m_users_timer[connfd].reactor = this;
 
     util_timer *timer = new util_timer;
     timer->user_data = &m_users_timer[connfd];
@@ -200,14 +203,21 @@ void SubReactor::adjust_timer(util_timer *timer)
     m_utils.update_timerfd();
 }
 
-void SubReactor::deal_timer(util_timer *timer, int sockfd)
+void SubReactor::deal_timer(util_timer *timer, int sockfd, bool is_timeout)
 {
+    if (is_timeout)
+    {
+        ServerStats::get_instance().conn_timeout();
+    }
+
     if (!timer)
     {
+        m_active_connections.fetch_sub(1, std::memory_order_relaxed);
         m_users[sockfd].close_conn();
         return;
     }
 
+    m_active_connections.fetch_sub(1, std::memory_order_relaxed);
     m_users[sockfd].close_conn();
     m_utils.m_timer_heap.del_timer(timer);
     m_utils.update_timerfd();

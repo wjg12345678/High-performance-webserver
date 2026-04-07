@@ -3,6 +3,7 @@
 
 #include <queue>
 #include <string>
+#include <atomic>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <pthread.h>
@@ -29,6 +30,8 @@ public:
     bool init();
     bool start();
     bool add_connection(int connfd, const sockaddr_in &client_address);
+    int get_active_connections() const { return m_active_connections.load(std::memory_order_relaxed); }
+    void dec_active_connections() { m_active_connections.fetch_sub(1, std::memory_order_relaxed); }
 
 private:
     static void *worker(void *arg);
@@ -37,7 +40,7 @@ private:
     void init_connection(int connfd, const sockaddr_in &client_address);
     void add_timer(int connfd, const sockaddr_in &client_address);
     void adjust_timer(util_timer *timer);
-    void deal_timer(util_timer *timer, int sockfd);
+    void deal_timer(util_timer *timer, int sockfd, bool is_timeout = false);
     void dealwithread(int sockfd);
     void dealwithwrite(int sockfd);
 
@@ -48,6 +51,7 @@ private:
     bool m_started;
     pthread_t m_thread;
     epoll_event m_events[SUB_REACTOR_MAX_EVENT_NUMBER];
+    std::atomic<int> m_active_connections{0};
 
     locker m_pending_lock;
     std::queue<pending_conn> m_pending_connections;

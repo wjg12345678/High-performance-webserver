@@ -16,6 +16,7 @@ public:
     threadpool(connection_pool *connPool, int thread_number = 8, int max_request = 10000);
     ~threadpool();
     bool append(T *request);
+    int queue_size();
 
 private:
     /*工作线程运行的函数，它不断从工作队列中取出任务并执行之*/
@@ -72,6 +73,14 @@ bool threadpool<T>::append(T *request)
     m_queuelocker.unlock();
     m_queuestat.post();
     return true;
+}
+template <typename T>
+int threadpool<T>::queue_size()
+{
+    m_queuelocker.lock();
+    const int size = static_cast<int>(m_workqueue.size());
+    m_queuelocker.unlock();
+    return size;
 }
 template <typename T>
 void *threadpool<T>::worker(void *arg)
